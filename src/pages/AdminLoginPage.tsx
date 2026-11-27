@@ -21,63 +21,63 @@ export const AdminLoginPage: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto px-4 py-12">
-      <div className="p-6 sm:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl">
-        <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center mb-4">
-          <ShieldCheck className="w-6 h-6 text-indigo-400" />
+      <div className="p-6 sm:p-8 rounded-3xl bg-white border border-amber-200 shadow-xl">
+        <div className="w-12 h-12 rounded-2xl bg-[#5C0E1C]/10 border border-[#5C0E1C]/20 flex items-center justify-center mb-4">
+          <ShieldCheck className="w-6 h-6 text-[#5C0E1C]" />
         </div>
-        <h1 className="text-2xl font-extrabold text-white">Admin Portal Login</h1>
-        <p className="text-xs text-slate-400 mt-1 mb-6">
+        <h1 className="text-2xl font-black text-slate-900">Admin Portal Login</h1>
+        <p className="text-xs text-slate-500 mt-1 mb-6">
           Role-Based Access for Super Admin &amp; Category Sub-Admins
         </p>
 
         {error && (
-          <div className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs">
+          <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-xs text-slate-300 block mb-1">Email</label>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Email</label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               <input
                 type="email"
                 required
                 placeholder="Enter your admin email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500 outline-none"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#7A1C24] focus:bg-white outline-none"
               />
             </div>
           </div>
 
           <div>
-            <label className="text-xs text-slate-300 block mb-1">Password</label>
+            <label className="text-xs font-semibold text-slate-700 block mb-1">Password</label>
             <div className="relative">
-              <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               <input
                 type="password"
                 required
                 placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white placeholder:text-slate-500 focus:border-indigo-500 outline-none"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#7A1C24] focus:bg-white outline-none"
               />
             </div>
           </div>
 
           <button
             type="submit"
-            className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm transition cursor-pointer"
+            className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#5C0E1C] to-indigo-700 hover:opacity-95 text-white font-bold text-sm shadow-md transition cursor-pointer"
           >
             Sign In
           </button>
         </form>
 
         {!isSupabaseConfigured && (
-          <div className="mt-6 pt-5 border-t border-slate-800 space-y-2">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase">
+          <div className="mt-6 pt-5 border-t border-slate-100 space-y-2">
+            <div className="text-[11px] font-bold text-slate-500 uppercase">
               Quick Demo Accounts (password: password123)
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -94,7 +94,7 @@ export const AdminLoginPage: React.FC = () => {
                     setEmail(acc.mail);
                     setPassword('password123');
                   }}
-                  className="p-2 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 text-left transition cursor-pointer"
+                  className="p-2 rounded-lg bg-slate-50 hover:bg-amber-50 border border-slate-200 text-slate-700 font-medium text-left transition cursor-pointer"
                 >
                   {acc.label}
                 </button>
