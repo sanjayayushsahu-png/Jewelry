@@ -139,14 +139,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
+    const client = supabase;
 
     const fetchAll = async () => {
       const [s, jr, jo, cm, mo] = await Promise.all([
-        supabase.from('app_settings').select('*').single(),
-        supabase.from('jewellery_rates').select('*').order('updated_at', { ascending: false }),
-        supabase.from('jewellery_offers').select('*'),
-        supabase.from('construction_materials').select('*').order('updated_at', { ascending: false }),
-        supabase.from('mobile_offers').select('*').order('updated_at', { ascending: false }),
+        client.from('app_settings').select('*').single(),
+        client.from('jewellery_rates').select('*').order('updated_at', { ascending: false }),
+        client.from('jewellery_offers').select('*'),
+        client.from('construction_materials').select('*').order('updated_at', { ascending: false }),
+        client.from('mobile_offers').select('*').order('updated_at', { ascending: false }),
       ]);
       if (s.data) setSettings(s.data);
       if (jr.data) setJewelleryRates(jr.data);
@@ -156,13 +157,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     fetchAll();
-    const channel = supabase
+    const channel = client
       .channel('public-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => fetchAll())
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      client.removeChannel(channel);
     };
   }, []);
 
