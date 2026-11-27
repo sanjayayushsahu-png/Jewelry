@@ -34,6 +34,9 @@ interface AppContextValue {
   constructionMaterials: ConstructionMaterial[];
   mobileOffers: MobileOffer[];
   orders: CustomerOrder[];
+  cloudStatus: 'connected' | 'local' | 'error';
+  cloudError: string | null;
+  syncAllToCloud: () => Promise<{ ok: boolean; error?: string }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
   canManage: (category: CategoryType) => boolean;
@@ -69,17 +72,27 @@ function loadLocal<T>(key: string, fallback: T): T {
   }
 }
 
-async function saveCloudKey<T>(key: string, value: T) {
-  if (!isSupabaseConfigured || !supabase) return;
+async function saveCloudKey<T>(key: string, value: T): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured || !supabase) return { ok: false, error: 'Supabase not configured' };
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData.session) {
+    return { ok: false, error: 'Session expired — please Sign Out and Sign In again.' };
+  }
   const { error } = await supabase
     .from('site_data')
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
   if (error) {
     console.error(`[Cloud Sync] Failed saving ${key}:`, error.message);
+    return { ok: false, error: error.message };
   }
+  return { ok: true };
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [cloudStatus, setCloudStatus] = useState<'connected' | 'local' | 'error'>(
+    isSupabaseConfigured ? 'connected' : 'local',
+  );
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const [lang, setLang] = useState<Language>(() => loadLocal('lang', 'en'));
   const [settings, setSettings] = useState<AppSettings>(() => {
     const loaded = loadLocal('settings', INITIAL_SETTINGS);
@@ -259,11 +272,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(null);
   };
 
+  const persistCloud = async <T,>(key: string, value: T) => {
+    if (!isSupabaseConfigured) return;
+    const res = await saveCloudKey(key, value);
+    if (res.ok) {
+      setCloudStatus('connected');
+      setCloudError(null);
+    } else {
+      setCloudStatus('error');
+      setCloudError(res.error ?? 'Cloud sync failed');
+    }
+  };
+
+  const syncAllToCloud = async (): Promise<{ ok: boolean; error?: string }> => {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ok: false, error: 'Supabase environment variables are not configured on this host.' };
+    }
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session) {
+      const msg = 'Admin session expired. Please click Sign Out and Sign In again.';
+      setCloudStatus('error');
+      setCloudError(msg);
+      return { ok: false, error: msg };
+    }
+    const entries = [
+      { key: 'settings', value: settings, updated_at: new Date().toISOString() },
+      { key: 'jewelleryRates', value: jewelleryRates, updated_at: new Date().toISOString() },
+      { key: 'jewelleryOffers', value: jewelleryOffers, updated_at: new Date().toISOString() },
+      { key: 'jewelleryItems', value: jewelleryItems, updated_at: new Date().toISOString() },
+      { key: 'constructionMaterials', value: constructionMaterials, updated_at: new Date().toISOString() },
+      { key: 'mobileOffers', value: mobileOffers, updated_at: new Date().toISOString() },
+    ];
+    const { error } = await supabase.from('site_data').upsert(entries, { onConflict: 'key' });
+    if (error) {
+      setCloudStatus('error');
+      setCloudError(error.message);
+      return { ok: false, error: error.message };
+    }
+    setCloudStatus('connected');
+    setCloudError(null);
+    return { ok: true };
+  };
+
   const updateSettings = async (next: Partial<AppSettings>) => {
     if (currentUser?.role !== 'super_admin') return;
     const updated = { ...settings, ...next, updated_at: new Date().toISOString() };
     setSettings(updated);
-    await saveCloudKey('settings', updated);
+    await persistCloud('settings', updated);
   };
 
   const upsertSubAdmin = async (admin: Omit<AdminProfile, 'created_at'>) => {
@@ -298,14 +353,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? jewelleryRates.map((x) => (x.id === stamped.id ? stamped : x))
       : [stamped, ...jewelleryRates];
     setJewelleryRates(next);
-    await saveCloudKey('jewelleryRates', next);
+    await persistCloud('jewelleryRates', next);
   };
 
   const deleteJewelleryRate = async (id: string) => {
     if (!canManage('jewellery')) return;
     const next = jewelleryRates.filter((x) => x.id !== id);
     setJewelleryRates(next);
-    await saveCloudKey('jewelleryRates', next);
+    await persistCloud('jewelleryRates', next);
   };
 
   const upsertJewelleryOffer = async (item: JewelleryOffer) => {
@@ -314,14 +369,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? jewelleryOffers.map((x) => (x.id === item.id ? item : x))
       : [item, ...jewelleryOffers];
     setJewelleryOffers(next);
-    await saveCloudKey('jewelleryOffers', next);
+    await persistCloud('jewelleryOffers', next);
   };
 
   const deleteJewelleryOffer = async (id: string) => {
     if (!canManage('jewellery')) return;
     const next = jewelleryOffers.filter((x) => x.id !== id);
     setJewelleryOffers(next);
-    await saveCloudKey('jewelleryOffers', next);
+    await persistCloud('jewelleryOffers', next);
   };
 
   const upsertJewelleryItem = async (item: JewelleryItem) => {
@@ -330,14 +385,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? jewelleryItems.map((x) => (x.id === item.id ? item : x))
       : [item, ...jewelleryItems];
     setJewelleryItems(next);
-    await saveCloudKey('jewelleryItems', next);
+    await persistCloud('jewelleryItems', next);
   };
 
   const deleteJewelleryItem = async (id: string) => {
     if (!canManage('jewellery')) return;
     const next = jewelleryItems.filter((x) => x.id !== id);
     setJewelleryItems(next);
-    await saveCloudKey('jewelleryItems', next);
+    await persistCloud('jewelleryItems', next);
   };
 
   const upsertConstruction = async (item: ConstructionMaterial) => {
@@ -347,14 +402,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? constructionMaterials.map((x) => (x.id === stamped.id ? stamped : x))
       : [stamped, ...constructionMaterials];
     setConstructionMaterials(next);
-    await saveCloudKey('constructionMaterials', next);
+    await persistCloud('constructionMaterials', next);
   };
 
   const deleteConstruction = async (id: string) => {
     if (!canManage('construction')) return;
     const next = constructionMaterials.filter((x) => x.id !== id);
     setConstructionMaterials(next);
-    await saveCloudKey('constructionMaterials', next);
+    await persistCloud('constructionMaterials', next);
   };
 
   const upsertMobile = async (item: MobileOffer) => {
@@ -364,14 +419,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? mobileOffers.map((x) => (x.id === stamped.id ? stamped : x))
       : [stamped, ...mobileOffers];
     setMobileOffers(next);
-    await saveCloudKey('mobileOffers', next);
+    await persistCloud('mobileOffers', next);
   };
 
   const deleteMobile = async (id: string) => {
     if (!canManage('mobile')) return;
     const next = mobileOffers.filter((x) => x.id !== id);
     setMobileOffers(next);
-    await saveCloudKey('mobileOffers', next);
+    await persistCloud('mobileOffers', next);
   };
 
   const submitOrder = (input: Omit<CustomerOrder, 'id' | 'status' | 'created_at'>): CustomerOrder => {
@@ -421,6 +476,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         constructionMaterials,
         mobileOffers,
         orders,
+        cloudStatus,
+        cloudError,
+        syncAllToCloud,
         login,
         logout,
         canManage,

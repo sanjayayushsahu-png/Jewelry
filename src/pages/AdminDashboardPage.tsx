@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import {
   Ban,
   CheckCircle,
+  CloudUpload,
   Edit3,
   Gem,
   HardHat,
@@ -126,6 +127,9 @@ export const AdminDashboardPage: React.FC = () => {
     orders,
     updateOrderStatus,
     deleteOrder,
+    cloudStatus,
+    cloudError,
+    syncAllToCloud,
   } = useApp();
 
   const isSuper = currentUser?.role === 'super_admin';
@@ -255,28 +259,63 @@ export const AdminDashboardPage: React.FC = () => {
       )}
 
       {/* Admin Header */}
-      <div className="p-5 rounded-2xl bg-slate-900/90 border border-white/10 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center">
-            <Shield className="w-5 h-5 text-indigo-400" />
-          </div>
-          <div>
-            <div className="font-bold text-white flex items-center gap-2">
-              {currentUser.full_name}
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-indigo-500/25 text-indigo-200">
-                {isSuper ? 'Super Admin' : `Sub-Admin • ${currentUser.assigned_category}`}
-              </span>
+      <div className="p-5 rounded-2xl bg-slate-900/95 border border-white/10 space-y-3 shadow-lg">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-indigo-400" />
             </div>
-            <div className="text-xs text-slate-400">{currentUser.email}</div>
+            <div>
+              <div className="font-bold text-white flex flex-wrap items-center gap-2">
+                {currentUser.full_name}
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-indigo-500/25 text-indigo-200">
+                  {isSuper ? 'Super Admin' : `Sub-Admin • ${currentUser.assigned_category}`}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    cloudStatus === 'connected'
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : cloudStatus === 'error'
+                        ? 'bg-rose-500/20 text-rose-300'
+                        : 'bg-amber-500/20 text-amber-300'
+                  }`}
+                >
+                  {cloudStatus === 'connected'
+                    ? '● Cloud Live'
+                    : cloudStatus === 'error'
+                      ? '● Cloud Sync Error'
+                      : '● Local Demo Mode'}
+                </span>
+              </div>
+              <div className="text-xs text-slate-400">{currentUser.email}</div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={async () => {
+                const res = await syncAllToCloud();
+                if (res.ok) showToast('All data synced live to all mobile devices!');
+                else alert(`Cloud Sync Error: ${res.error}`);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold transition cursor-pointer"
+            >
+              <CloudUpload className="w-4 h-4" /> Sync All to Mobile
+            </button>
+            <button
+              onClick={logout}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-600/20 hover:text-rose-300 text-xs font-semibold text-slate-200 border border-slate-700 transition cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" /> Sign Out
+            </button>
           </div>
         </div>
 
-        <button
-          onClick={logout}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-rose-600/20 hover:text-rose-300 text-xs font-semibold text-slate-200 border border-slate-700 transition cursor-pointer"
-        >
-          <LogOut className="w-4 h-4" /> Sign Out
-        </button>
+        {cloudError && (
+          <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-200 text-xs font-semibold">
+            Cloud Sync Issue: {cloudError}
+          </div>
+        )}
       </div>
 
       {/* RBAC Tabs */}
