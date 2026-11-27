@@ -166,3 +166,44 @@ alter publication supabase_realtime add table
   public.jewellery_offers,
   public.construction_materials,
   public.mobile_offers;
+
+-- ============================================================================
+-- Unified Live Cloud Sync Store (All Products, Rates, Photos & Customer Orders)
+-- ============================================================================
+create table if not exists public.site_data (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.customer_orders (
+  id text primary key,
+  category text not null,
+  product_name text not null,
+  product_price numeric(12, 2) not null,
+  customer_name text not null,
+  customer_phone text not null,
+  city_address text not null,
+  quantity text not null,
+  notes text default '',
+  status text not null default 'new',
+  created_at timestamptz not null default now()
+);
+
+alter table public.site_data enable row level security;
+alter table public.customer_orders enable row level security;
+
+create policy "Public read site_data" on public.site_data for select using (true);
+create policy "Authenticated admins write site_data" on public.site_data for all
+  to authenticated using (true) with check (true);
+
+create policy "Public submit customer orders" on public.customer_orders for insert
+  to anon, authenticated with check (true);
+create policy "Authenticated admins manage orders" on public.customer_orders for select
+  to authenticated using (true);
+create policy "Authenticated admins update orders" on public.customer_orders for update
+  to authenticated using (true) with check (true);
+create policy "Authenticated admins delete orders" on public.customer_orders for delete
+  to authenticated using (true);
+
+alter publication supabase_realtime add table public.site_data, public.customer_orders;

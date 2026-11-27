@@ -69,6 +69,16 @@ function loadLocal<T>(key: string, fallback: T): T {
   }
 }
 
+async function saveCloudKey<T>(key: string, value: T) {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { error } = await supabase
+    .from('site_data')
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) {
+    console.error(`[Cloud Sync] Failed saving ${key}:`, error.message);
+  }
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [lang, setLang] = useState<Language>(() => loadLocal('lang', 'en'));
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -94,6 +104,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSettings(INITIAL_SETTINGS);
     }
   }, [settings.brand_name, settings.brand_name_hi, settings.address, settings.support_phone]);
+
   const [admins, setAdmins] = useState<AdminProfile[]>(() => loadLocal('admins', INITIAL_ADMINS));
   const [currentUser, setCurrentUser] = useState<AdminProfile | null>(() => loadLocal('currentUser', null));
   const [jewelleryRates, setJewelleryRates] = useState<JewelleryRate[]>(() =>
@@ -137,35 +148,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     orders,
   ]);
 
+  // Live Supabase Cloud Sync (reads on load + subscribes to real-time updates across all devices)
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     const client = supabase;
 
-    const fetchAll = async () => {
-      const [s, jr, jo, cm, mo] = await Promise.all([
-        client.from('app_settings').select('*').single(),
-        client.from('jewellery_rates').select('*').order('updated_at', { ascending: false }),
-        client.from('jewellery_offers').select('*'),
-        client.from('construction_materials').select('*').order('updated_at', { ascending: false }),
-        client.from('mobile_offers').select('*').order('updated_at', { ascending: false }),
-      ]);
-      if (s.data) setSettings(s.data);
-      if (jr.data) setJewelleryRates(jr.data);
-      if (jo.data) setJewelleryOffers(jo.data);
-      if (cm.data) setConstructionMaterials(cm.data);
-      if (mo.data) setMobileOffers(mo.data);
+    const fetchCloudData = async () => {
+      const { data: rows, error } = await client.from('site_data').select('key, value');
+      if (!error && rows) {
+        for (const row of rows) {
+          if (row.key === 'settings' && row.value) setSettings(row.value as AppSettings);
+          if (row.key === 'jewelleryRates' && Array.isArray(row.value))
+            setJewelleryRates(row.value as JewelleryRate[]);
+          if (row.key === 'jewelleryOffers' && Array.isArray(row.value))
+            setJewelleryOffers(row.value as JewelleryOffer[]);
+          if (row.key === 'jewelleryItems' && Array.isArray(row.value))
+            setJewelleryItems(row.value as JewelleryItem[]);
+          if (row.key === 'constructionMaterials' && Array.isArray(row.value))
+            setConstructionMaterials(row.value as ConstructionMaterial[]);
+          if (row.key === 'mobileOffers' && Array.isArray(row.value))
+            setMobileOffers(row.value as MobileOffer[]);
+        }
+      }
+
+      const { data: cloudOrders, error: ordErr } = await client
+        .from('customer_orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!ordErr && cloudOrders) {
+        setOrders(cloudOrders as CustomerOrder[]);
+      }
     };
 
-    fetchAll();
+    fetchCloudData();
+
     const channel = client
-      .channel('public-db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public' }, () => fetchAll())
+      .channel('cg-bazar-live-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_data' }, () => {
+        fetchCloudData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customer_orders' }, () => {
+        fetchCloudData();
+      })
       .subscribe();
 
     return () => {
       client.removeChannel(channel);
     };
-  }, []);
+  }, [currentUser]);
 
   const toggleLang = () => setLang((prev) => (prev === 'en' ? 'hi' : 'en'));
 
@@ -195,7 +225,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { ok: true };
       }
 
-      // Fallback for verified Super Admin owner if admin_profiles row/RLS is not yet synced
       if (data.user.email?.toLowerCase() === 'sanjayayushsahu@gmail.com') {
         const ownerProfile: AdminProfile = {
           id: data.user.id,
@@ -234,9 +263,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (currentUser?.role !== 'super_admin') return;
     const updated = { ...settings, ...next, updated_at: new Date().toISOString() };
     setSettings(updated);
-    if (isSupabaseConfigured && supabase) {
-      await supabase.from('app_settings').upsert({ id: 1, ...updated });
-    }
+    await saveCloudKey('settings', updated);
   };
 
   const upsertSubAdmin = async (admin: Omit<AdminProfile, 'created_at'>) => {
@@ -267,79 +294,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const upsertJewelleryRate = async (item: JewelleryRate) => {
     if (!canManage('jewellery')) return;
     const stamped = { ...item, updated_at: new Date().toISOString() };
-    setJewelleryRates((prev) =>
-      prev.some((x) => x.id === stamped.id)
-        ? prev.map((x) => (x.id === stamped.id ? stamped : x))
-        : [stamped, ...prev],
-    );
-    if (isSupabaseConfigured && supabase) await supabase.from('jewellery_rates').upsert(stamped);
+    const next = jewelleryRates.some((x) => x.id === stamped.id)
+      ? jewelleryRates.map((x) => (x.id === stamped.id ? stamped : x))
+      : [stamped, ...jewelleryRates];
+    setJewelleryRates(next);
+    await saveCloudKey('jewelleryRates', next);
   };
 
   const deleteJewelleryRate = async (id: string) => {
     if (!canManage('jewellery')) return;
-    setJewelleryRates((prev) => prev.filter((x) => x.id !== id));
-    if (isSupabaseConfigured && supabase) await supabase.from('jewellery_rates').delete().eq('id', id);
+    const next = jewelleryRates.filter((x) => x.id !== id);
+    setJewelleryRates(next);
+    await saveCloudKey('jewelleryRates', next);
   };
 
   const upsertJewelleryOffer = async (item: JewelleryOffer) => {
     if (!canManage('jewellery')) return;
-    setJewelleryOffers((prev) =>
-      prev.some((x) => x.id === item.id) ? prev.map((x) => (x.id === item.id ? item : x)) : [item, ...prev],
-    );
-    if (isSupabaseConfigured && supabase) await supabase.from('jewellery_offers').upsert(item);
+    const next = jewelleryOffers.some((x) => x.id === item.id)
+      ? jewelleryOffers.map((x) => (x.id === item.id ? item : x))
+      : [item, ...jewelleryOffers];
+    setJewelleryOffers(next);
+    await saveCloudKey('jewelleryOffers', next);
   };
 
   const deleteJewelleryOffer = async (id: string) => {
     if (!canManage('jewellery')) return;
-    setJewelleryOffers((prev) => prev.filter((x) => x.id !== id));
-    if (isSupabaseConfigured && supabase) await supabase.from('jewellery_offers').delete().eq('id', id);
+    const next = jewelleryOffers.filter((x) => x.id !== id);
+    setJewelleryOffers(next);
+    await saveCloudKey('jewelleryOffers', next);
   };
 
   const upsertJewelleryItem = async (item: JewelleryItem) => {
     if (!canManage('jewellery')) return;
-    setJewelleryItems((prev) =>
-      prev.some((x) => x.id === item.id) ? prev.map((x) => (x.id === item.id ? item : x)) : [item, ...prev],
-    );
+    const next = jewelleryItems.some((x) => x.id === item.id)
+      ? jewelleryItems.map((x) => (x.id === item.id ? item : x))
+      : [item, ...jewelleryItems];
+    setJewelleryItems(next);
+    await saveCloudKey('jewelleryItems', next);
   };
 
   const deleteJewelleryItem = async (id: string) => {
     if (!canManage('jewellery')) return;
-    setJewelleryItems((prev) => prev.filter((x) => x.id !== id));
+    const next = jewelleryItems.filter((x) => x.id !== id);
+    setJewelleryItems(next);
+    await saveCloudKey('jewelleryItems', next);
   };
 
   const upsertConstruction = async (item: ConstructionMaterial) => {
     if (!canManage('construction')) return;
     const stamped = { ...item, updated_at: new Date().toISOString() };
-    setConstructionMaterials((prev) =>
-      prev.some((x) => x.id === stamped.id)
-        ? prev.map((x) => (x.id === stamped.id ? stamped : x))
-        : [stamped, ...prev],
-    );
-    if (isSupabaseConfigured && supabase) await supabase.from('construction_materials').upsert(stamped);
+    const next = constructionMaterials.some((x) => x.id === stamped.id)
+      ? constructionMaterials.map((x) => (x.id === stamped.id ? stamped : x))
+      : [stamped, ...constructionMaterials];
+    setConstructionMaterials(next);
+    await saveCloudKey('constructionMaterials', next);
   };
 
   const deleteConstruction = async (id: string) => {
     if (!canManage('construction')) return;
-    setConstructionMaterials((prev) => prev.filter((x) => x.id !== id));
-    if (isSupabaseConfigured && supabase)
-      await supabase.from('construction_materials').delete().eq('id', id);
+    const next = constructionMaterials.filter((x) => x.id !== id);
+    setConstructionMaterials(next);
+    await saveCloudKey('constructionMaterials', next);
   };
 
   const upsertMobile = async (item: MobileOffer) => {
     if (!canManage('mobile')) return;
     const stamped = { ...item, updated_at: new Date().toISOString() };
-    setMobileOffers((prev) =>
-      prev.some((x) => x.id === stamped.id)
-        ? prev.map((x) => (x.id === stamped.id ? stamped : x))
-        : [stamped, ...prev],
-    );
-    if (isSupabaseConfigured && supabase) await supabase.from('mobile_offers').upsert(stamped);
+    const next = mobileOffers.some((x) => x.id === stamped.id)
+      ? mobileOffers.map((x) => (x.id === stamped.id ? stamped : x))
+      : [stamped, ...mobileOffers];
+    setMobileOffers(next);
+    await saveCloudKey('mobileOffers', next);
   };
 
   const deleteMobile = async (id: string) => {
     if (!canManage('mobile')) return;
-    setMobileOffers((prev) => prev.filter((x) => x.id !== id));
-    if (isSupabaseConfigured && supabase) await supabase.from('mobile_offers').delete().eq('id', id);
+    const next = mobileOffers.filter((x) => x.id !== id);
+    setMobileOffers(next);
+    await saveCloudKey('mobileOffers', next);
   };
 
   const submitOrder = (input: Omit<CustomerOrder, 'id' | 'status' | 'created_at'>): CustomerOrder => {
@@ -350,15 +382,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       created_at: new Date().toISOString(),
     };
     setOrders((prev) => [created, ...prev]);
+    if (isSupabaseConfigured && supabase) {
+      supabase
+        .from('customer_orders')
+        .insert(created)
+        .then(({ error }) => {
+          if (error) console.error('[Cloud Sync] Order insert failed:', error.message);
+        });
+    }
     return created;
   };
 
   const updateOrderStatus = (id: string, status: CustomerOrder['status']) => {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('customer_orders').update({ status }).eq('id', id).then(() => {});
+    }
   };
 
   const deleteOrder = (id: string) => {
     setOrders((prev) => prev.filter((o) => o.id !== id));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from('customer_orders').delete().eq('id', id).then(() => {});
+    }
   };
 
   return (
