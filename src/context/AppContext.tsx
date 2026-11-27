@@ -184,14 +184,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         .from('admin_profiles')
         .select('*')
         .eq('id', data.user.id)
-        .single();
-      if (pErr || !profile) return { ok: false, error: 'Admin profile not found' };
-      if (profile.status === 'suspended') {
-        await supabase.auth.signOut();
-        return { ok: false, error: 'Your account has been suspended by the Super Admin.' };
+        .maybeSingle();
+
+      if (profile) {
+        if (profile.status === 'suspended') {
+          await supabase.auth.signOut();
+          return { ok: false, error: 'Your account has been suspended by the Super Admin.' };
+        }
+        setCurrentUser(profile);
+        return { ok: true };
       }
-      setCurrentUser(profile);
-      return { ok: true };
+
+      // Fallback for verified Super Admin owner if admin_profiles row/RLS is not yet synced
+      if (data.user.email?.toLowerCase() === 'sanjayayushsahu@gmail.com') {
+        const ownerProfile: AdminProfile = {
+          id: data.user.id,
+          email: data.user.email,
+          full_name: 'Sanjay Sahu (Super Admin)',
+          role: 'super_admin',
+          assigned_category: null,
+          status: 'active',
+          created_at: new Date().toISOString(),
+        };
+        setCurrentUser(ownerProfile);
+        return { ok: true };
+      }
+
+      if (pErr) return { ok: false, error: `Profile error: ${pErr.message}` };
+      return { ok: false, error: 'Admin profile not found in admin_profiles table.' };
     }
 
     const found = admins.find(
